@@ -1,0 +1,5 @@
+name: hermes-memory
+version: 0.1.0
+description: "Hermes external memory service provider — task-time recall + durable memory mirroring via the local hermes-memory HTTP API."
+hooks:
+  - on_memory_write
