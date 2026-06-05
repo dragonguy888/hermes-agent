@@ -167,6 +167,10 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "skill.youtube": ("youtube-transcript-api==1.2.4",),
 
     # ─── Tools ─────────────────────────────────────────────────────────────
+    # Inbound attachment ingestion: MarkItDown converts cached local office/PDF
+    # documents to Markdown before the agent sees the turn. Keep this opt-in /
+    # lazy-installed so normal chat sessions do not pay the dependency surface.
+    "attachment.markitdown": ("markitdown[pdf,docx,pptx,xlsx,xls]==0.1.6",),
     # ACP adapter (VS Code / Zed / JetBrains integration)
     "tool.acp": ("agent-client-protocol==0.9.0",),
     # Dashboard (`hermes dashboard`)

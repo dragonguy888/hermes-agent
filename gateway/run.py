@@ -8595,9 +8595,23 @@ class GatewayRunner:
 
         if event.media_urls and event.message_type == MessageType.DOCUMENT:
             import mimetypes as _mimetypes
+            from gateway.document_ingestion import (
+                TEXT_EXTENSIONS as _TEXT_EXTENSIONS,
+                convert_document_attachment,
+                display_name_from_cache_path,
+            )
             from tools.credential_files import to_agent_visible_cache_path
 
-            _TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".log", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg"}
+            _markitdown_cfg: dict[str, Any] = {}
+            try:
+                _attachments_cfg = _load_gateway_config().get("attachments", {})
+                if isinstance(_attachments_cfg, dict):
+                    _raw_markitdown_cfg = _attachments_cfg.get("markitdown", {})
+                    if isinstance(_raw_markitdown_cfg, dict):
+                        _markitdown_cfg = _raw_markitdown_cfg
+            except Exception:
+                _markitdown_cfg = {}
+
             for i, path in enumerate(event.media_urls):
                 mtype = event.media_types[i] if i < len(event.media_types) else ""
                 if mtype in {"", "application/octet-stream"}:
@@ -8611,10 +8625,7 @@ class GatewayRunner:
                 if not mtype.startswith(("application/", "text/")):
                     continue
 
-                basename = os.path.basename(path)
-                parts = basename.split("_", 2)
-                display_name = parts[2] if len(parts) >= 3 else basename
-                display_name = re.sub(r'[^\w.\- ]', '_', display_name)
+                display_name = display_name_from_cache_path(path)
 
                 # Translate host cache path to in-container path if running under Docker backend.
                 # This ensures the agent receives a path it can open inside its sandbox, as the
@@ -8627,13 +8638,17 @@ class GatewayRunner:
                         f"Its content has been included below. "
                         f"The file is also saved at: {agent_path}]"
                     )
-                else:
-                    context_note = (
-                        f"[The user sent a document: '{display_name}'. "
-                        f"The file is saved at: {agent_path}. "
-                        f"Ask the user what they'd like you to do with it.]"
-                    )
-                message_text = f"{context_note}\n\n{message_text}"
+                    message_text = f"{context_note}\n\n{message_text}"
+                    continue
+
+                _ingestion = await convert_document_attachment(
+                    path=path,
+                    agent_path=agent_path,
+                    mime_type=mtype,
+                    user_text=event.text or "",
+                    config=_markitdown_cfg,
+                )
+                message_text = f"{_ingestion.prompt_block()}\n\n{message_text}"
 
         if getattr(event, "reply_to_text", None) and event.reply_to_message_id:
             # Always inject the reply-to pointer — even when the quoted text
