@@ -788,6 +788,10 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
         or base_url_host_matches(agent.base_url, "moonshot.cn")
     )
     _is_tokenhub = base_url_host_matches(agent._base_url_lower, "tokenhub.tencentmaas.com")
+    _is_zai = (
+        base_url_host_matches(agent.base_url, "api.z.ai")
+        or base_url_host_matches(agent.base_url, "open.bigmodel.cn")
+    )
     _is_lmstudio = (agent.provider or "").strip().lower() == "lmstudio"
 
     # Temperature: _fixed_temperature_for_model may return OMIT_TEMPERATURE
@@ -917,6 +921,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
         is_nvidia_nim=_is_nvidia,
         is_kimi=_is_kimi,
         is_tokenhub=_is_tokenhub,
+        is_zai=_is_zai,
         is_lmstudio=_is_lmstudio,
         is_custom_provider=agent.provider == "custom",
         ollama_num_ctx=agent._ollama_num_ctx,
