@@ -17,6 +17,15 @@ from agent.memory_provider import MemoryProvider
 
 logger = logging.getLogger(__name__)
 
+_FORWARDED_METADATA_KEYS = frozenset({
+    "write_origin",
+    "execution_context",
+    "parent_session_id",
+    "tool_name",
+    "task_id",
+    "tool_call_id",
+})
+
 
 def _find_git_root(start: Path) -> Optional[Path]:
     current = start.resolve()
@@ -219,7 +228,6 @@ class HermesMemoryProvider(MemoryProvider):
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_thread: Optional[threading.Thread] = None
-        self._sync_thread: Optional[threading.Thread] = None
 
     @property
     def name(self) -> str:
@@ -278,33 +286,37 @@ class HermesMemoryProvider(MemoryProvider):
         self._prefetch_thread.start()
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
-        if self._agent_context != "primary":
-            return
-        content = assistant_content.strip()
-        if not content:
-            return
-        if not self._looks_durable(content):
-            return
-        if self._sync_thread and self._sync_thread.is_alive():
-            return
-
-        def _runner() -> None:
-            self._ingest(scope=self._preferred_write_scope(), content=content, kind=self._classify_kind(content), summary=content[:280])
-
-        self._sync_thread = threading.Thread(target=_runner, daemon=True)
-        self._sync_thread.start()
+        """No-op in every agent context. Durable writes only ever arrive via the
+        explicit ``memory`` tool (``on_memory_write``) or MCP ``ingest`` — never
+        from automatic whole-response mirroring."""
+        return None
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         return []
 
-    def on_memory_write(self, action: str, target: str, content: str) -> None:
+    def on_memory_write(
+        self,
+        action: str,
+        target: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if self._agent_context != "primary":
             return
         if action not in {"add", "replace"}:
             return
         scope = self._user_scope if target == "user" and self._user_scope else self._preferred_write_scope()
         kind = "preference" if target == "user" else self._classify_kind(content)
-        self._ingest(scope=scope, content=content, kind=kind, summary=content[:280])
+        self._ingest(
+            scope=scope,
+            content=content,
+            kind=kind,
+            summary=content[:280],
+            source="hermes-explicit",
+            importance=0.85,
+            confidence=0.9,
+            extra_metadata=metadata,
+        )
 
     def shutdown(self) -> None:
         return None
@@ -320,21 +332,6 @@ class HermesMemoryProvider(MemoryProvider):
 
     def _preferred_write_scope(self) -> str:
         return self._project_scope or self._user_scope or self._global_scope
-
-    def _looks_durable(self, text: str) -> bool:
-        durable_patterns = [
-            r"\bprefer(?:s|ence)?\b",
-            r"\blikes?\b",
-            r"\bmust\b",
-            r"\brequired\b",
-            r"\bconstraint\b",
-            r"\bverified\b",
-            r"\broot cause\b",
-            r"\bfix(?:ed)?\b",
-            r"\bdeploy(?:ment)?\b",
-            r"偏好|喜欢|必须|约束|修复|已验证|部署",
-        ]
-        return any(re.search(pattern, text, re.IGNORECASE) for pattern in durable_patterns)
 
     def _classify_kind(self, text: str) -> str:
         lower = text.lower()
@@ -363,7 +360,30 @@ class HermesMemoryProvider(MemoryProvider):
         context = str(data.get("context", "") or "").strip()
         return f"## hermes-memory recall\n{context}" if context else ""
 
-    def _ingest(self, *, scope: str, content: str, kind: str, summary: str) -> None:
+    def _ingest(
+        self,
+        *,
+        scope: str,
+        content: str,
+        kind: str,
+        summary: str,
+        source: str,
+        importance: float,
+        confidence: float,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        metadata: Dict[str, Any] = {
+            key: value
+            for key, value in (extra_metadata or {}).items()
+            if key in _FORWARDED_METADATA_KEYS
+        }
+        # Provider-owned provenance is authoritative and cannot be overridden by
+        # caller metadata.
+        metadata.update({
+            "sessionId": self._session_id,
+            "platform": self._platform,
+            "writePath": "on_memory_write",
+        })
         payload = {
             "scope": scope,
             "items": [{
@@ -371,15 +391,12 @@ class HermesMemoryProvider(MemoryProvider):
                 "title": f"Hermes memory {self._platform}",
                 "content": content,
                 "summary": summary,
-                "source": "hermes-runtime",
+                "source": source,
                 "sourceRef": self._session_id,
-                "importance": 0.85,
-                "confidence": 0.9,
+                "importance": importance,
+                "confidence": confidence,
                 "tags": ["hermes", self._platform, kind],
-                "metadata": {
-                    "sessionId": self._session_id,
-                    "platform": self._platform,
-                },
+                "metadata": metadata,
             }],
         }
         try:
