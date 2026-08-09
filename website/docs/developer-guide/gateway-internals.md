@@ -67,6 +67,31 @@ When a message arrives from any platform:
    - Otherwise → create `AIAgent` instance and run conversation
 4. **Response** is sent back through the platform adapter
 
+### Cached Document Attachments
+
+Non-image, non-audio, and non-video attachments are handled in the inbound message path by `gateway/document_ingestion.py`:
+
+1. The gateway only passes files that were already downloaded into Hermes' local attachment cache to `MarkItDown.convert_local()`. It does not pass user-controlled URLs or URI schemes to the converter.
+2. Plain-text files are left as path-based context notes. Supported document formats such as PDF, Word, PowerPoint, Excel, HTML, and EPUB are converted to Markdown and included in the agent prompt.
+3. Converted Markdown is cached beside the original attachment when `save_markdown_cache` is enabled. Output is capped at 60,000 characters by default, and conversion is capped at 25 MB and 45 seconds by default.
+4. ZIP archives are not converted unless explicitly enabled with `allow_archives: true`. `mode: manual` requires an intent such as read, summarize, analyze, or convert before conversion; `mode: off` disables conversion.
+
+The optional converter dependency is resolved through the `document-ingestion` extra and lazy dependency key `attachment.markitdown`:
+
+```yaml
+attachments:
+  markitdown:
+    enabled: true
+    mode: auto              # auto | manual | off
+    max_file_mb: 25
+    max_markdown_chars: 60000
+    timeout_seconds: 45
+    save_markdown_cache: true
+    allow_archives: false
+```
+
+The Hermes dependency is pinned to `markitdown[pdf,docx,pptx,xlsx,xls]==0.1.7`. The focused contract tests live in `tests/gateway/test_document_ingestion.py`.
+
 ### Session Key Format
 
 Session keys encode the full routing context:
