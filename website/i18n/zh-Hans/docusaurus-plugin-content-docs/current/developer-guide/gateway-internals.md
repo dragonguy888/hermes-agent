@@ -67,6 +67,31 @@ description: "消息 gateway 如何启动、授权用户、路由会话以及投
    - 否则 → 创建 `AIAgent` 实例并运行对话
 4. **响应**通过平台适配器回传
 
+### 缓存文档附件
+
+非图片、非音频和非视频附件会在入站消息路径中由 `gateway/document_ingestion.py` 处理：
+
+1. Gateway 只会将已经下载到 Hermes 本地附件缓存的文件传给 `MarkItDown.convert_local()`，不会将用户可控的 URL 或 URI scheme 传给转换器。
+2. 纯文本文件保留为指向文件路径的上下文提示。PDF、Word、PowerPoint、Excel、HTML 和 EPUB 等支持的文档格式会转换为 Markdown 并注入 agent prompt。
+3. 启用 `save_markdown_cache` 时，转换后的 Markdown 会缓存在原附件旁边。默认输出上限为 60,000 个字符，文件上限为 25 MB，转换超时为 45 秒。
+4. 除非显式设置 `allow_archives: true`，否则不会转换 ZIP 压缩包。`mode: manual` 只有在用户表达读取、总结、分析或转换意图时才会转换；`mode: off` 会禁用转换。
+
+可选的转换依赖通过 `document-ingestion` extra 和 lazy dependency key `attachment.markitdown` 解析：
+
+```yaml
+attachments:
+  markitdown:
+    enabled: true
+    mode: auto              # auto | manual | off
+    max_file_mb: 25
+    max_markdown_chars: 60000
+    timeout_seconds: 45
+    save_markdown_cache: true
+    allow_archives: false
+```
+
+Hermes 依赖固定为 `markitdown[pdf,docx,pptx,xlsx,xls]==0.1.7`。对应的 focused contract tests 位于 `tests/gateway/test_document_ingestion.py`。
+
 ### 会话键格式
 
 会话键编码了完整的路由上下文：
