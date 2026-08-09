@@ -16392,9 +16392,23 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         if event.media_urls:
             import mimetypes as _mimetypes
+            from gateway.document_ingestion import (
+                TEXT_EXTENSIONS as _TEXT_EXTENSIONS,
+                convert_document_attachment,
+                display_name_from_cache_path,
+            )
             from tools.credential_files import to_agent_visible_cache_path
 
-            _TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".log", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg"}
+            _markitdown_cfg: dict[str, Any] = {}
+            try:
+                _attachments_cfg = _load_gateway_config().get("attachments", {})
+                if isinstance(_attachments_cfg, dict):
+                    _raw_markitdown_cfg = _attachments_cfg.get("markitdown", {})
+                    if isinstance(_raw_markitdown_cfg, dict):
+                        _markitdown_cfg = _raw_markitdown_cfg
+            except Exception:
+                _markitdown_cfg = {}
+
             for i, path in enumerate(event.media_urls):
                 # Per-attachment document handling. Skip anything already routed
                 # as image / audio / video by the buckets above — only genuine
@@ -16424,18 +16438,30 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 # all file types now, so a non-text/non-application MIME (font/*,
                 # model/*, etc.) must still tell the agent the file exists.
 
-                basename = os.path.basename(path)
-                parts = basename.split("_", 2)
-                display_name = parts[2] if len(parts) >= 3 else basename
-                display_name = re.sub(r'[^\w.\- ]', '_', display_name)
+                display_name = display_name_from_cache_path(path)
 
                 # Translate host cache path to in-container path if running under Docker backend.
                 # This ensures the agent receives a path it can open inside its sandbox, as the
                 # cache directories are auto-mounted at /root/.hermes/cache/* by get_cache_directory_mounts().
                 agent_path = to_agent_visible_cache_path(path)
 
-                context_note = _build_document_context_note(display_name, agent_path, mtype)
-                message_text = f"{context_note}\n\n{message_text}"
+                if mtype.startswith("text/"):
+                    context_note = _build_document_context_note(display_name, agent_path, mtype)
+                    message_text = f"{context_note}\n\n{message_text}"
+                    continue
+
+                _ingestion = await convert_document_attachment(
+                    path=path,
+                    agent_path=agent_path,
+                    mime_type=mtype,
+                    user_text=event.text or "",
+                    config=_markitdown_cfg,
+                )
+                if _ingestion.status == "skipped":
+                    context_note = _build_document_context_note(display_name, agent_path, mtype)
+                    message_text = f"{context_note}\n\n{message_text}"
+                else:
+                    message_text = f"{_ingestion.prompt_block()}\n\n{message_text}"
 
         # Discord: surface the triggering message id per-turn on the user
         # message rather than in the cached system prompt. message_id changes

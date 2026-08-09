@@ -183,6 +183,7 @@ matrix = ["mautrix[encryption]==0.21.0", "aiosqlite==0.22.1", "asyncpg==0.31.0",
 # and XXE. aiohttp/httpx are already in [messaging]; defusedxml lands
 # here to keep the dependency local to wecom_callback's threat model.
 wecom = ["defusedxml==0.7.1"]
+document-ingestion = ["markitdown[pdf,docx,pptx,xlsx,xls]==0.1.7"]
 cli = ["simple-term-menu==1.6.6"]
 tts-premium = ["elevenlabs==1.59.0"]
 voice = [
@@ -371,7 +372,7 @@ override-dependencies = [
 exclude-newer = "14 days"
 # h2: temporary exclude-newer exception for the CVE-2026-71554 (GHSA-6hr6-w5qg-qmwg,
 # request-smuggling) fix in 4.4.1, published 2026-08-03. Remove after 2026-08-17.
-exclude-newer-package = { vercel = false, nemo-relay = false, huggingface_hub = false, h2 = false }
+exclude-newer-package = { vercel = false, nemo-relay = false, huggingface_hub = false, h2 = false, markitdown = false }
 
 [tool.setuptools]
 # Top-level single-file modules (not packages). Without this, uv2nix's
